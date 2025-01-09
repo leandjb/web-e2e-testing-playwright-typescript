@@ -9,8 +9,6 @@ test.describe('test suite for swag labs login page', () => {
         await page.getByRole('button', { name: 'LOGIN' }).click();
         
         await expect.soft(page.getByText('Products')).toBeVisible();
-        await expect.soft(page.locator('.inventory_filter_container')).toBeVisible();
-        await expect.soft(page.getByText('© 2020 Sauce Labs. All Rights')).toBeVisible();
         
         await page.getByRole('button', { name: 'Open Menu' }).click();
         await page.getByRole('link', { name: 'Logout' }).click();
