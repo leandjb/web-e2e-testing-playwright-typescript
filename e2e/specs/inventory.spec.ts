@@ -13,9 +13,22 @@ test.describe('Inventory', () => {
     const inventory = new InventoryPage(page);
     await inventory.goto();
     await inventory.sortBy('lohi');
-    const prices = await inventory.items
-      .locator('[data-test="inventory-item-price"]')
-      .allTextContents();
+    // SauceDemo re-renders the list client-side after the sort; wait for the
+    // re-sort to settle (prices become sorted) before reading them.
+    const priceLocator = inventory.items.locator('[data-test="inventory-item-price"]');
+    await expect
+      .poll(
+        async () => {
+          const nums = (await priceLocator.allTextContents()).map((p) =>
+            parseFloat(p.replace('$', '')),
+          );
+          const sorted = [...nums].sort((a, b) => a - b);
+          return JSON.stringify(nums) === JSON.stringify(sorted);
+        },
+        { timeout: 5_000 },
+      )
+      .toBe(true);
+    const prices = await priceLocator.allTextContents();
     const nums = prices.map((p) => parseFloat(p.replace('$', '')));
     const sorted = [...nums].sort((a, b) => a - b);
     expect(nums).toEqual(sorted);

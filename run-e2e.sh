@@ -36,7 +36,7 @@ run_shard() {
     -e "SHARD_INDEX=$idx" \
     -e "TOTAL_SHARDS=$total" \
     -e "TEST_MODE=$MODE" \
-    e2e bash -c "set -e; corepack enable && pnpm install --frozen-lockfile && pnpm exec playwright test --shard=$idx/$total $GREP_FLAG"
+    e2e bash -c "set -e; if [ ! -x node_modules/.bin/playwright ]; then corepack enable && pnpm install --frozen-lockfile; fi; node_modules/.bin/playwright test --shard=$idx/$total $GREP_FLAG"
 }
 
 overall=0
@@ -69,7 +69,10 @@ timeout 300 docker compose run --rm merge
 merge_rc=$?
 set -e
 
-docker compose down -v --remove-orphans 2>/dev/null || true
+# Keep the shared node_modules_cache volume so subsequent local runs reuse the
+# installed deps and never hit corepack/npm (which can hang when offline).
+# Force a clean reinstall with: docker compose down -v
+docker compose down --remove-orphans 2>/dev/null || true
 
 if [ "$overall" -ne 0 ]; then
   echo "!! One or more shards failed."

@@ -12,9 +12,10 @@ export default defineConfig({
   baseURL: BASE_URL,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  // One retry to absorb the occasional flake against a public demo site
-  // (transient 503s and session resets on saucedemo.com), both locally and in CI.
-  retries: 1,
+  // No blanket retry. Flakiness must be visible and root-caused, not masked.
+  // Known-flaky tests are tagged `@flaky` and run in a separate project (below)
+  // that opts into retries while everything else stays at 0.
+  retries: 0,
   // One worker per container: sharding is done at the container level by
   // run-e2e.sh / the CI matrix, not by Playwright workers.
   workers: 1,
@@ -41,6 +42,21 @@ export default defineConfig({
         // Chromium fails to launch under root in a container without this.
         launchOptions: { args: ['--no-sandbox'] },
       },
+      // Exclude quarantined tests from the main run so they only execute in the
+      // `@flaky` project below (which opts into retries).
+      grepInvert: /@flaky/,
+    },
+    {
+      // Quarantine for tests known to be intermittently failing for reasons not
+      // yet root-caused. These still run (with retries) so coverage is kept,
+      // but they are isolated from the trustworthy zero-retry main run.
+      name: 'chromium-flaky',
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: { args: ['--no-sandbox'] },
+      },
+      grep: /@flaky/,
+      retries: 2,
     },
   ],
 });

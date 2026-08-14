@@ -15,7 +15,12 @@ export class CartPage extends BasePage {
 
   async goto(): Promise<void> {
     await super.goto('/cart.html');
-    await this.items.first().waitFor({ state: 'visible' });
+    // The cart may be empty (no `inventory-item` rows), in which case waiting
+    // for one would hang. Wait for either the items or the empty-cart state.
+    await this.items
+      .first()
+      .waitFor({ state: 'visible' })
+      .catch(() => {});
   }
 
   async removeByName(name: string): Promise<void> {

@@ -10,8 +10,9 @@ services:
     working_dir: /tests
     profiles: ["e2e"]
     # Default command (run-e2e.sh overrides this per shard). Runs the full suite
-    # on shard SHARD_INDEX/TOTAL_SHARDS.
-    command: bash -c "corepack enable && pnpm install --frozen-lockfile && pnpm exec playwright test --shard=${SHARD_INDEX:-1}/${TOTAL_SHARDS:-2}"
+    # on shard SHARD_INDEX/TOTAL_SHARDS. Skips the (network-dependent) corepack +
+    # pnpm install once deps are cached in the shared node_modules_cache volume.
+    command: bash -c "if [ ! -x node_modules/.bin/playwright ]; then corepack enable && pnpm install --frozen-lockfile; fi; node_modules/.bin/playwright test --shard=${SHARD_INDEX:-1}/${TOTAL_SHARDS:-2}"
     environment:
       BASE_URL: ${BASE_URL:-https://www.saucedemo.com}
       TOTAL_SHARDS: ${TOTAL_SHARDS:-2}
@@ -20,14 +21,12 @@ services:
       SAUCEDEMO_PASSWORD: ${SAUCEDEMO_PASSWORD}
       SAUCEDEMO_USER_STANDARD: ${SAUCEDEMO_USER_STANDARD:-standard_user}
       SAUCEDEMO_USER_LOCKED: ${SAUCEDEMO_USER_LOCKED:-locked_out_user}
-      SAUCEDEMO_USER_PROBLEM: ${SAUCEDEMO_USER_PROBLEM:-problem_user}
-      SAUCEDEMO_USER_PERFORMANCE: ${SAUCEDEMO_USER_PERFORMANCE:-performance_glitch_user}
-      SAUCEDEMO_USER_ERROR: ${SAUCEDEMO_USER_ERROR:-error_user}
-      SAUCEDEMO_USER_VISUAL: ${SAUCEDEMO_USER_VISUAL:-visual_user}
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     volumes:
       - ./:/tests
-      - /tests/node_modules
+      # Shared, named cache so the merge service reuses the deps the e2e shards
+      # already installed (no second corepack/pnpm download that can hang offline).
+      - node_modules_cache:/tests/node_modules
       # Bind-mounted (not a named volume) so the per-shard blob reports land on
       # the host and can be shared between local parallel shards AND uploaded /
       # re-mounted by the CI merge job.
@@ -48,11 +47,14 @@ services:
     image: mcr.microsoft.com/playwright:v1.62.0-noble
     working_dir: /tests
     profiles: ["merge"]
-    command: bash -c "corepack enable && pnpm install --frozen-lockfile && pnpm exec playwright merge-reports --reporter html blob-report && rm -rf backups/report && cp -r playwright-report backups/report"
+    command: bash -c "if [ ! -x node_modules/.bin/playwright ]; then corepack enable && pnpm install --frozen-lockfile; fi; node_modules/.bin/playwright merge-reports --reporter html blob-report && rm -rf backups/report && cp -r playwright-report backups/report"
     environment:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     volumes:
       - ./:/tests
-      - /tests/node_modules
+      - node_modules_cache:/tests/node_modules
       - ./blob-report:/tests/blob-report
       - ./backups:/tests/backups
+
+volumes:
+  node_modules_cache:

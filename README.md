@@ -94,10 +94,26 @@ lives inside the pinned image `mcr.microsoft.com/playwright:v1.62.0-noble`.
   single validation pass (e.g. empty checkout form); hard `expect` guards
   gatekeepers (login success, locked-user denial, checkout total).
 - **Tagged execution**: `@smoke` for fast PR feedback, `@regression` for full
-  runs, `@user-*` for session requirements.
+  runs. Known-flaky tests are tagged `@flaky` and quarantined (see below).
 - **Defense-in-depth timeouts**: `test.timeout`, `expect.timeout`,
   `globalTimeout`, `timeout` wrappers in the script, container `shm_size` /
   `ipc` / `init` / `pids_limit` / `mem_limit`, and a `timeout-minutes` backstop.
+
+## Flake quarantine (`@flaky`)
+
+Flakiness is treated as a bug to be root-caused, not hidden. The suite runs with
+**zero retries** by default, so a green run reflects genuinely stable tests
+rather than a retried pass. When a test is found to be intermittently failing
+for a reason not yet understood:
+
+1. Tag it `@flaky`. It then runs in the separate `chromium-flaky` project, which
+   opts into `retries: 2`, so coverage is preserved while the main run stays
+   trustworthy.
+2. Root-cause it (check `auth.setup` session reuse, `networkidle`-style waits, or
+   shared server state first).
+3. Once fixed, **remove the `@flaky` tag** so it returns to the zero-retry run.
+
+Never use `@flaky` as a permanent home for a failing test.
 
 ## CI: required GitHub Secrets & Variables
 
@@ -111,10 +127,10 @@ The workflow (`.github/workflows/ci.yml`) reads the following from the repo's
 | `SAUCEDEMO_PASSWORD`      | `secret_sauce`     | Shared password for all demo users.  |
 | `SAUCEDEMO_USER_STANDARD` | `standard_user`    | Working account.                     |
 | `SAUCEDEMO_USER_LOCKED`   | `locked_out_user`  | Intentionally locked-out account.    |
-| `SAUCEDEMO_USER_PROBLEM`  | `problem_user`     | Reserved for future expansion.       |
-| `SAUCEDEMO_USER_PERFORMANCE` | `performance_glitch_user` | Reserved for future expansion. |
-| `SAUCEDEMO_USER_ERROR`    | `error_user`       | Reserved for future expansion.       |
-| `SAUCEDEMO_USER_VISUAL`   | `visual_user`      | Reserved for future expansion.       |
+| `SAUCEDEMO_USER_PROBLEM`  | `problem_user`     | Optional — not currently consumed; reserved for the future user-matrix expansion. |
+| `SAUCEDEMO_USER_PERFORMANCE` | `performance_glitch_user` | Optional — not currently consumed; reserved for the future user-matrix expansion. |
+| `SAUCEDEMO_USER_ERROR`    | `error_user`       | Optional — not currently consumed; reserved for the future user-matrix expansion. |
+| `SAUCEDEMO_USER_VISUAL`   | `visual_user`      | Optional — not currently consumed; reserved for the future user-matrix expansion. |
 
 **Variables** (Settings → Variables):
 
