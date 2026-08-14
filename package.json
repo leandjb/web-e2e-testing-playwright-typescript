@@ -17,10 +17,10 @@
     }
   },
   "dependencies": {
-    "@fission-ai/openspec": "1.9.0"
+    "@fission-ai/openspec": "^1.9.0"
   },
   "devDependencies": {
     "@playwright/test": "1.62.0",
-    "typescript": "5.6.0"
+    "typescript": "^5.6.0"
   }
 }
