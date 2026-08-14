@@ -1,161 +1,247 @@
 # Web E2E Testing — Playwright (TypeScript)
 
-Containerized, parallel end-to-end tests for [SauceDemo](https://www.saucedemo.com/),
-built with Playwright + TypeScript and designed to run **identically in local
-Docker and GitHub Actions** — with **zero package installation on the host**.
+Containerized end-to-end test suite for [SauceDemo](https://www.saucedemo.com/),
+built with **Playwright + TypeScript**. Runs identically in local Docker and
+GitHub Actions with **zero package installation on the host**.
 
-This repo doubles as an interview-ready QA portfolio: green CI, a clean
-Page-Object structure, secure multi-user auth, soft/hard assertion discipline,
-and a 2-shard matrix with a merged HTML report.
+## Objective
 
-## What it does
-
-- Runs a ~17-test Playwright suite across four feature areas: **auth**,
-  **inventory**, **cart**, and **checkout**.
-- Authenticates users **once per run** and reuses persisted sessions via
-  Playwright `storageState` (no repeated logins inside tests).
-- Splits the suite across **2 shards** in CI and merges the per-shard blob
-  reports into a single HTML report.
-- Persists evidence (HTML report + failure screenshots) to `backups/`.
-- Uses semantic, user-facing locators (`getByRole`, `getByTestId`) and never
-  fixed `waitForTimeout` sleeps.
-
-## How to run it (Docker only)
-
-You only need **Docker** installed. Everything else (Node, Playwright, browsers)
-lives inside the pinned image `mcr.microsoft.com/playwright:v1.62.0-noble`.
-
-1. Copy the env template and fill in credentials (gitignored, never committed):
-
-   ```bash
-   cp .env.example .env
-   # edit .env — at minimum set SAUCEDEMO_PASSWORD=secret_sauce for local runs
-   ```
-
-2. Run the full suite across 2 local shards (installs deps in-container, merges
-   the report, and cleans up):
-
-   ```bash
-   bash run-e2e.sh 2 full
-   ```
-
-   Or just the smoke subset on a single shard:
-
-   ```bash
-   bash run-e2e.sh 1 smoke
-   ```
-
-3. Open the merged report:
-
-   ```bash
-   open backups/report/index.html
-   ```
-
-> No `npm install` / `pnpm install` on the host. Dependencies are installed
-> **inside the container** via `corepack enable && pnpm install --frozen-lockfile`.
+Automate and validate the core user flows of SauceDemo — login, product
+browsing, cart management, and checkout — through a maintainable, parallelizable
+test suite that produces reliable evidence (HTML reports, failure screenshots)
+on every run.
 
 ## Architecture
 
+```mermaid
+graph TB
+    subgraph Host["Host Machine"]
+        CLI["Docker CLI"]
+    end
+
+    subgraph Docker["Docker Compose"]
+        direction TB
+        PW["Playwright v1.62.0<br/>Node + Chromium"]
+        Tests["/tests (bind-mounted)"]
+        subgraph E2E["e2e/"]
+            direction LR
+            Specs["specs/<br/>auth · inventory<br/>cart · checkout"]
+            Pages["pages/<br/>Page Objects"]
+            Fixtures["fixtures/<br/>Authenticated<br/>sessions"]
+            Data["data/<br/>Test users"]
+        end
+        Auth["auth.setup.ts<br/>Session creation"]
+        Config["playwright.config.ts"]
+    end
+
+    subgraph Output["Output"]
+        Report["backups/report/<br/>HTML Report"]
+        Screenshots["backups/<br/>Failure screenshots"]
+    end
+
+    subgraph CI["GitHub Actions"]
+        direction LR
+        Shard1["Shard 1"]
+        Shard2["Shard 2"]
+        Merge["Merge job"]
+    end
+
+    CLI -->|"docker compose run"| PW
+    PW --> Tests
+    Tests --> E2E
+    Auth -->|".auth/*.json"| Fixtures
+    PW --> Report
+    PW --> Screenshots
+
+    CI -->|"matrix: [1,2]"| Shard1
+    CI -->|"matrix: [1,2]"| Shard2
+    Shard1 -->|"blob-report"| Merge
+    Shard2 -->|"blob-report"| Merge
+    Merge -->|"HTML report"| Report
 ```
-┌──────────────┐   ┌──────────────────────────────────────────────┐
-│  Host (only  │   │  Docker Compose (mcr.microsoft.com/playwright │
-│  Docker CLI) │   │            v1.62.0-noble, working_dir /tests)  │
-└──────┬───────┘   └──────────────────────────────────────────────┘
-       │ docker compose run --rm e2e (x N shards, parallel)
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  /tests  (project bind-mounted)                                   │
-│   ├─ e2e/ (specs, pages, fixtures, data)                          │
-│   ├─ playwright.config.ts  (blob reporter → blob-report/)         │
-│   ├─ auth.setup.ts        (logs in users → .auth/<role>.json)     │
-│   ├─ blob-report/         (per-shard blobs, bind-mounted)         │
-│   └─ backups/             (merged HTML report + screenshots)      │
-└─────────────────────────────────────────────────────────────────┘
-       │ run-e2e.sh aggregates exit codes, then:
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  merge service: playwright merge-reports → backups/report (HTML) │
-└─────────────────────────────────────────────────────────────────┘
 
- CI matrix (shard: [1,2], fail-fast: false)
-   e2e (shard 1) ─┐
-                  ├─ upload blob-report-1 / blob-report-2 ─┐
-   e2e (shard 2) ─┘                                        ▼
-                                                  merge job → html-report
+### Key Design Decisions
+
+- **Page Object Model**: Specs describe *behavior*, not selectors. All
+  locators live in `e2e/pages/`.
+- **Authenticated fixtures**: Each test logs in fresh via `beforeEach` to avoid
+  shared-session flakiness and cart state leakage between tests.
+- **Zero retries**: A green run means genuinely stable tests. Known-flaky tests
+  are quarantined with `@flaky` and run separately with retries.
+- **Sharded execution**: Tests split across N parallel containers locally, or a
+  2-shard CI matrix, with merged HTML reports.
+
+## Tools
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| [Playwright](https://playwright.dev/) | 1.62.0 | Browser automation framework |
+| [TypeScript](https://www.typescriptlang.org/) | 5.6+ | Type-safe test code |
+| [Docker](https://www.docker.com/) | Latest | Container runtime (no host deps) |
+| [Docker Compose](https://docs.docker.com/compose/) | v2+ | Service orchestration |
+| [pnpm](https://pnpm.io/) | 11.21.0 | Package manager (inside container) |
+| [GitHub Actions](https://github.com/features/actions) | — | CI/CD pipeline |
+
+## Getting Started
+
+### Prerequisites
+
+- **Docker** (with Compose v2): [Install Docker](https://docs.docker.com/get-docker/)
+
+That's it. No Node.js, no npm, no browser installs on your host.
+
+### Verify Docker Installation
+
+```bash
+# Check Docker is running
+docker info > /dev/null 2>&1 && echo "Docker is ready" || echo "Docker is not running"
+
+# Check Compose v2 is available
+docker compose version
 ```
 
-## Tech used
+### 1. Clone repo
 
-- **Playwright 1.62.0** (pinned to match the container's browsers) with the
-  TypeScript test runner.
-- **Page Object Model** (`e2e/pages/`) so specs describe behavior, not selectors.
-- **Soft + hard assertions**: `expect.soft` collects every discrepancy in a
-  single validation pass (e.g. empty checkout form); hard `expect` guards
-  gatekeepers (login success, locked-user denial, checkout total).
-- **Tagged execution**: `@smoke` for fast PR feedback, `@regression` for full
-  runs. Known-flaky tests are tagged `@flaky` and quarantined (see below).
-- **Defense-in-depth timeouts**: `test.timeout`, `expect.timeout`,
-  `globalTimeout`, `timeout` wrappers in the script, container `shm_size` /
-  `ipc` / `init` / `pids_limit` / `mem_limit`, and a `timeout-minutes` backstop.
+```bash
+git clone https://github.com/leandjb/web-e2e-testing-playwright-typescript.git
 
-## Flake quarantine (`@flaky`)
+cd web-e2e-testing-playwright-typescript
 
-Flakiness is treated as a bug to be root-caused, not hidden. The suite runs with
-**zero retries** by default, so a green run reflects genuinely stable tests
-rather than a retried pass. When a test is found to be intermittently failing
-for a reason not yet understood:
+# edit your local .env textfile and fill variables
+cp .env.example .env
+```
 
-1. Tag it `@flaky`. It then runs in the separate `chromium-flaky` project, which
-   opts into `retries: 2`, so coverage is preserved while the main run stays
-   trustworthy.
-2. Root-cause it (check `auth.setup` session reuse, `networkidle`-style waits, or
-   shared server state first).
-3. Once fixed, **remove the `@flaky` tag** so it returns to the zero-retry run.
+**IMPORTANT:** The `.env` file is gitignored and **must never be committed**.
 
-Never use `@flaky` as a permanent home for a failing test.
+### 2. Run Tests
 
-## CI: required GitHub Secrets & Variables
+All commands run inside Docker — no host dependencies required.
 
-The workflow (`.github/workflows/ci.yml`) reads the following from the repo's
-**Settings → Secrets and variables → Actions**. They are never committed.
 
-**Secrets** (Settings → Secrets):
+**Smoke subset (single shard, fast feedback):**
 
-| Name                      | Example value      | Purpose                              |
-| ------------------------- | ------------------ | ------------------------------------ |
-| `SAUCEDEMO_PASSWORD`      | `secret_sauce`     | Shared password for all demo users.  |
-| `SAUCEDEMO_USER_STANDARD` | `standard_user`    | Working account.                     |
-| `SAUCEDEMO_USER_LOCKED`   | `locked_out_user`  | Intentionally locked-out account.    |
-| `SAUCEDEMO_USER_PROBLEM`  | `problem_user`     | Optional — not currently consumed; reserved for the future user-matrix expansion. |
-| `SAUCEDEMO_USER_PERFORMANCE` | `performance_glitch_user` | Optional — not currently consumed; reserved for the future user-matrix expansion. |
-| `SAUCEDEMO_USER_ERROR`    | `error_user`       | Optional — not currently consumed; reserved for the future user-matrix expansion. |
-| `SAUCEDEMO_USER_VISUAL`   | `visual_user`      | Optional — not currently consumed; reserved for the future user-matrix expansion. |
+```bash
+docker compose run --rm -e SHARD_INDEX=1 -e TOTAL_SHARDS=1 e2e \
+  bash -c "corepack enable && pnpm install --frozen-lockfile; node_modules/.bin/playwright test --shard=1/1 --grep @smoke"
+```
 
-**Variables** (Settings → Variables):
+**By tag — run only `@regression` tests:**
 
-| Name       | Example value                 | Purpose              |
-| ---------- | ----------------------------- | -------------------- |
-| `BASE_URL` | `https://www.saucedemo.com`   | Application under test. |
+```bash
+docker compose run --rm -e SHARD_INDEX=1 -e TOTAL_SHARDS=1 e2e \
+  bash -c "corepack enable && pnpm install --frozen-lockfile; node_modules/.bin/playwright test --shard=1/1 --grep @regression"
+```
 
-Triggers: `pull_request` → smoke subset, `push` to `main` → full suite,
-`schedule` (`0 0 1,15 * *`) → full suite.
+**By file — run a specific spec:**
 
-## What I'd add next
+Note: Just REPLACE with specific PATH test-file such as 'e2e/specs/auth.spec.ts'
 
-- **Expand the user matrix** to the remaining 5 SauceDemo accounts
-  (`problem_user`, `performance_glitch_user`, …) with per-role fixtures.
-- **Visual regression** on the inventory page (once the suite is larger).
-- **Self-hosted runner** if the free-tier minutes become a constraint.
-- **API contract checks** — *if* the target ever exposes a public API.
+```bash
+docker compose run --rm -e SHARD_INDEX=1 -e TOTAL_SHARDS=1 e2e \
+  bash -c "corepack enable && pnpm install --frozen-lockfile; node_modules/.bin/playwright test --shard=1/1 e2e/specs/auth.spec.ts"
+```
 
-### Why there are no API tests
+**By test title — run a specific test:**
 
-SauceDemo is a **UI-only** demo site with **no public API** (the login and cart
-flows are exercised exclusively through the browser). Adding API tests would
-require either a backend we don't own or fabricating endpoints, which would test
-nothing real — so the scope is intentionally UI/E2E only (YAGNI).
+Note: Just REPLACE with specific MESSAGE such as 'logs in successfully'
 
-## Bug reports
+```bash
+docker compose run --rm -e SHARD_INDEX=1 -e TOTAL_SHARDS=1 e2e \
+  bash -c "corepack enable && pnpm install --frozen-lockfile; node_modules/.bin/playwright test --shard=1/1 -g 'logs in successfully'"
+```
 
-Sample defect write-ups live in [`bug-reports/`](./bug-reports).
+### 3. View Results 
+
+```bash
+open backups/report/index.html    # macOS
+vim backups/report/index.html  # Linux
+notepad.exe backups/report/index.html  # Windows
+```
+
+The report includes:
+- Test results with pass/fail status
+- Failure screenshots
+- Trace files for debugging
+
+### 4. Cleanup
+
+```bash
+docker compose down --remove-orphans
+```
+
+To also clear cached dependencies (forces reinstall on next run):
+
+```bash
+docker compose down -v
+```
+
+## Project Structure
+
+```
+.
+├── e2e/
+│   ├── data/           # Test user credentials
+│   ├── fixtures/       # Authenticated test fixtures
+│   ├── pages/          # Page Object Model classes
+│   └── specs/          # Test files (auth, inventory, cart, checkout)
+├── quality-control/
+│   ├── test-plans/     # Module test plans with traceability
+│   └── bug-reports/    # Defect documentation
+├── .github/workflows/  # CI pipeline (smoke on PR, full on main)
+├── auth.setup.ts       # Global setup: session creation
+├── playwright.config.ts # Playwright configuration
+├── docker-compose.yml  # Container services (e2e + merge)
+└── .env.example        # Environment template (copy to .env)
+```
+
+## Test Tags
+
+| Tag | Purpose | When to run |
+|-----|---------|-------------|
+| `@smoke` | Critical path tests | Every PR (fast feedback) |
+| `@regression` | Full coverage | Main branch, scheduled |
+| `@flaky` | Quarantined (retries: 2) | Isolated from stable run |
+
+Run by tag with `--grep`:
+
+```bash
+# Smoke only
+docker compose run --rm -e SHARD_INDEX=1 -e TOTAL_SHARDS=1 e2e \
+  bash -c "corepack enable && pnpm install --frozen-lockfile; node_modules/.bin/playwright test --shard=1/1 --grep @smoke"
+
+# Regression only
+docker compose run --rm -e SHARD_INDEX=1 -e TOTAL_SHARDS=1 e2e \
+  bash -c "corepack enable && pnpm install --frozen-lockfile; node_modules/.bin/playwright test --shard=1/1 --grep @regression"
+```
+
+## CI Pipeline
+
+The GitHub Actions workflow runs automatically:
+
+- **Pull requests** → smoke subset (1 shard)
+- **Push to main** → full suite (2 shards + merged report)
+- **Scheduled** (1st and 15th) → full suite
+
+```mermaid
+graph LR
+    PR["Pull Request"] -->|"smoke"| Shard1["Shard 1"]
+    Push["Push to main"] -->|"full"| Shard1
+    Push -->|"full"| Shard2["Shard 2"]
+    Shard1 -->|"blob"| Merge["Merge"]
+    Shard2 -->|"blob"| Merge
+    Merge --> Report["HTML Report"]
+    Report --> Artifact["Upload Artifact"]
+```
+
+## Troubleshooting and problems
+
+**Container won't start:**
+```bash
+docker compose down -v && docker compose pull
+```
+
+**Tests timeout:**
+```bash
+docker stats
+```
+
