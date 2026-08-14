@@ -1,0 +1,82 @@
+name: e2e
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Full suite roughly every 15 days (1st and 15th of each month).
+    - cron: "0 0 1,15 * *"
+
+# Allow one in-flight run per ref; cancel superseded runs on push.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: e2e (shard ${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # A failing shard must NOT cancel the other shard (full evidence kept).
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    env:
+      # CI=true makes run-e2e.sh skip the local merge/cleanup step; the merge
+      # job handles report assembly after the blobs are uploaded.
+      CI: "true"
+      BASE_URL: ${{ vars.BASE_URL }}
+      TOTAL_SHARDS: 2
+      SHARD_INDEX: ${{ matrix.shard }}
+      TEST_MODE: ${{ github.event_name == 'pull_request' && 'smoke' || 'full' }}
+      SAUCEDEMO_PASSWORD: ${{ secrets.SAUCEDEMO_PASSWORD }}
+      SAUCEDEMO_USER_STANDARD: ${{ secrets.SAUCEDEMO_USER_STANDARD }}
+      SAUCEDEMO_USER_LOCKED: ${{ secrets.SAUCEDEMO_USER_LOCKED }}
+      SAUCEDEMO_USER_PROBLEM: ${{ secrets.SAUCEDEMO_USER_PROBLEM }}
+      SAUCEDEMO_USER_PERFORMANCE: ${{ secrets.SAUCEDEMO_USER_PERFORMANCE }}
+      SAUCEDEMO_USER_ERROR: ${{ secrets.SAUCEDEMO_USER_ERROR }}
+      SAUCEDEMO_USER_VISUAL: ${{ secrets.SAUCEDEMO_USER_VISUAL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run E2E shard
+        run: bash run-e2e.sh 1 ${{ github.event_name == 'pull_request' && 'smoke' || 'full' }}
+
+      - name: Upload blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: blob-report
+          retention-days: 7
+
+  merge:
+    name: merge reports
+    needs: e2e
+    # Always attempt to merge so a partial failure still yields a report.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download blob reports
+        uses: actions/download-artifact@v4
+        with:
+          path: blob-report
+          pattern: blob-report-*
+          merge-multiple: true
+
+      - name: Merge reports into HTML
+        run: docker compose run --rm merge
+
+      - name: Upload HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-report
+          path: backups/report
+          retention-days: 7

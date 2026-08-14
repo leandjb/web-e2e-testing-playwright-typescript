@@ -3,7 +3,8 @@
   "version": "1.0.1",
   "type": "module",
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "test:e2e": "playwright test"
   },
   "keywords": [],
   "author": "Leandro Barros",
@@ -17,5 +18,9 @@
   },
   "dependencies": {
     "@fission-ai/openspec": "^1.9.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.0",
+    "typescript": "^5.6.0"
   }
 }

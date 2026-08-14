@@ -6,3 +6,12 @@ node_modules/
 /auth
 .env
 
+# Playwright
+/playwright/.auth/
+.auth/
+
+# Local evidence (host-visible reports & screenshots)
+/backups/
+
+# Lockfile is committed; keep node_modules out of the image mount residue
+.pnpm-store/
